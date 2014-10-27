@@ -119,8 +119,3 @@ Sync.all(:status.not => :IDLE).map do |sync|
   sync.status = :IDLE
   sync.save
 end
-
-if Sync.count == 0
-  Sync.create(:space => "1000", :name => "hello")
-  Sync.create(:space => "1000", :name => "world", :status => :RUNNING)
-end
