@@ -2,23 +2,37 @@
 # listed in Gemfile.
 require 'bundler'
 require './sync'
+require 'logger'
 Bundler.require
 
-DataMapper::Logger.new(STDOUT, :debug)
+$logger = Logger.new(STDOUT)
+$logger.level = Logger::INFO
+
+#DataMapper::Logger.new(STDOUT, :debug)
 
 # Setup DataMapper with a database URL.
 DataMapper.setup(:default, "sqlite://#{Dir.pwd}/data/db.sqlite")
+
+synchronizer = Synchronizer.new WorkQueue.new 1
 
 # DataMapper model.
 class Sync
   include DataMapper::Resource
   property :id, Serial, :key => true
-  property :space, String, :length => 10..255, :required => true
+  property :space, String, :length => 10..10, :required => true
   property :name, String, :length => 255, :required => true
   property :from, String, :length => 255, :required => true
   property :to, String, :length => 255, :required => true
+  property :branches, String, :length => 512
   property :status, Enum[ :IDLE, :SCHEDULED, :RUNNING ], :default => :IDLE
   property :log, Text
+  
+  def info(message)    
+    $logger.info "#{space}/#{name}: #{message}"
+    self.log = self.log + "#{DateTime.now.strftime "%F %T" } - #{message}\n"
+    self.save    
+  end
+  
 end
 
 # Finalize the DataMapper models.
@@ -85,7 +99,9 @@ post '/spaces/:space/syncs/:name' do
   if @sync
     if @sync.status == :IDLE
       @sync.status = :SCHEDULED
+      @sync.log = "" 
       if @sync.save
+        synchronizer.schedule(@sync)
         ''
       else
         halt 500

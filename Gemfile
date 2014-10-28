@@ -3,4 +3,5 @@ gem 'sinatra'
 gem 'json'
 gem 'data_mapper'
 gem 'dm-sqlite-adapter'
-
+gem 'work_queue'
+gem 'git'
