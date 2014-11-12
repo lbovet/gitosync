@@ -19,6 +19,7 @@ synchronizer = Synchronizer.new WorkQueue.new 1
 class Sync
   include DataMapper::Resource
   property :id, Serial, :key => true
+  property :login, String
   property :space, String, :length => 10..10, :required => true
   property :name, String, :length => 255, :required => true
   property :from, String, :length => 255, :required => true
@@ -41,23 +42,59 @@ DataMapper.finalize
 # Tell DataMapper to update the database according to the definitions above.
 DataMapper.auto_upgrade!
 
+CLIENT_ID = ENV['GH_BASIC_CLIENT_ID']
+CLIENT_SECRET = ENV['GH_BASIC_SECRET_ID']
+
+use Rack::Session::Pool, :cookie_only => false
+
+def checkAuth!
+  if not session[:login]
+    body 'Forbidden'
+    halt 403
+  end
+end  
+
 get '/' do
-  send_file './public/index.html'
+  erb :index, :locals => {:client_id => CLIENT_ID, :username => session[:login], :avatar => session[:avatar]}
+end
+
+get '/auth' do
+  # get temporary GitHub code...
+  session_code = request.env['rack.request.query_hash']['code']
+
+  # ... and POST it back to GitHub
+  result = RestClient.post('https://github.com/login/oauth/access_token',
+                          {:client_id => CLIENT_ID,
+                           :client_secret => CLIENT_SECRET,
+                           :code => session_code},
+                           :accept => :json)
+
+  # extract the token and fetch user
+  access_token = JSON.parse(result)['access_token']
+  auth_result = JSON.parse(RestClient.get('https://api.github.com/user',
+                                        {:params => {:access_token => access_token}}))
+  if auth_result["login"]
+    session[:login] = auth_result["login"]
+    session[:avatar] = auth_result["avatar_url"]
+  end
+  redirect '/'
 end
 
 # Route to show all syncs of a space
 get '/spaces/:space/syncs/' do
+  checkAuth!
   content_type :json
-  @syncs = Sync.all(:space => params[:space], :order => :name).map{|sync| sync.name}
+  @syncs = Sync.all(:space => params[:space], :login => session[:login], :order => :name).map{|sync| sync.name}
   @syncs.to_json
 end
 
 # READ: Route to show a specific Sync
 get '/spaces/:space/syncs/:name' do
+  checkAuth!
   content_type :json
-  @sync = Sync.first(:space => params[:space], :name => params[:name])
+  @sync = Sync.first(:space => params[:space], :login => session[:login], :name => params[:name])
   if @sync
-    @sync.to_json(:exclude => [:id, :space, :name])
+    @sync.to_json(:exclude => [:id, :space, :name, :login])
   else
     halt 404
   end
@@ -65,14 +102,16 @@ end
 
 # UPDATE: Route to create or update a Sync
 put '/spaces/:space/syncs/:name' do
+  checkAuth!
   content_type :json
   @input = JSON.parse(request.body.read)
   @input.delete("id")
   @input.delete("space")
   @input.delete("name")
   @input.delete("status")
+  @input.delete("login")
   begin
-    @sync = Sync.first_or_create({:space => params[:space], :name => params[:name]}, @input)  
+    @sync = Sync.first_or_create({:space => params[:space], :login => session[:login], :name => params[:name]}, @input)  
     if not @sync.new?
       @sync.update(@input)
     end
@@ -117,8 +156,9 @@ end
 
 # DELETE: Route to delete a Sync
 delete '/spaces/:space/syncs/:name' do
+  checkAuth!
   content_type :json
-  @sync = Sync.first(:space => params[:space], :name => params[:name])
+  @sync = Sync.first(:space => params[:space], :login => session[:login], :name => params[:name])
   if @sync
     if @sync.destroy
       ''
