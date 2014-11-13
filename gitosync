@@ -1,0 +1,7 @@
+#!/bin/bash
+
+sudo -u gitosync ruby /home/gitosync/gitosync/control.rb $1
+RETVAL=$?
+
+exit $RETVAL
+
